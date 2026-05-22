@@ -1,61 +1,70 @@
-"""Snapshot management: persist and compare port scan results."""
+"""Snapshot persistence and diffing for portwatch."""
+
+from __future__ import annotations
 
 import json
-import logging
+from dataclasses import dataclass
 from pathlib import Path
-from dataclasses import asdict
-from typing import Optional
+from typing import Dict, List, Optional
 
 from portwatch.scanner import PortInfo
 
-logger = logging.getLogger(__name__)
 
-DEFAULT_SNAPSHOT_PATH = Path("/var/lib/portwatch/snapshot.json")
-
-
-def _port_info_from_dict(data: dict) -> PortInfo:
+def _port_info_from_dict(d: dict) -> PortInfo:
     return PortInfo(
-        port=data["port"],
-        protocol=data["protocol"],
-        service=data.get("service"),
-        state=data.get("state", "open"),
+        port=d["port"],
+        protocol=d["protocol"],
+        service=d.get("service"),
+        state=d.get("state", "open"),
     )
 
 
-def save_snapshot(ports: list[PortInfo], path: Path = DEFAULT_SNAPSHOT_PATH) -> None:
-    """Persist a list of PortInfo objects to a JSON snapshot file."""
+def save_snapshot(ports: List[PortInfo], path: Path) -> None:
+    """Persist a list of PortInfo objects to *path* as JSON."""
+    data = [
+        {
+            "port": p.port,
+            "protocol": p.protocol,
+            "service": p.service,
+            "state": p.state,
+        }
+        for p in ports
+    ]
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = [asdict(p) for p in ports]
-    path.write_text(json.dumps(payload, indent=2))
-    logger.info("Snapshot saved to %s (%d ports)", path, len(ports))
+    path.write_text(json.dumps(data, indent=2))
 
 
-def load_snapshot(path: Path = DEFAULT_SNAPSHOT_PATH) -> Optional[list[PortInfo]]:
-    """Load a previously saved snapshot. Returns None if the file does not exist."""
+def load_snapshot(path: Path) -> Optional[List[PortInfo]]:
+    """Load a snapshot from *path*.  Returns None if the file is absent."""
     if not path.exists():
-        logger.info("No existing snapshot found at %s", path)
         return None
     try:
         data = json.loads(path.read_text())
-        ports = [_port_info_from_dict(entry) for entry in data]
-        logger.info("Snapshot loaded from %s (%d ports)", path, len(ports))
-        return ports
-    except (json.JSONDecodeError, KeyError) as exc:
-        logger.error("Failed to parse snapshot at %s: %s", path, exc)
+        return [_port_info_from_dict(d) for d in data]
+    except (json.JSONDecodeError, KeyError):
         return None
 
 
+@dataclass
+class PortDiff:
+    added: List[PortInfo]
+    removed: List[PortInfo]
+
+    def has_changes(self) -> bool:
+        return bool(self.added or self.removed)
+
+
 def diff_snapshots(
-    previous: list[PortInfo], current: list[PortInfo]
-) -> dict[str, list[PortInfo]]:
-    """Compare two snapshots and return appeared/disappeared port sets."""
-    prev_set = {(p.port, p.protocol) for p in previous}
-    curr_set = {(p.port, p.protocol) for p in current}
+    old: List[PortInfo], new: List[PortInfo]
+) -> PortDiff:
+    """Return ports that were added or removed between two snapshots."""
 
-    appeared_keys = curr_set - prev_set
-    disappeared_keys = prev_set - curr_set
+    def key(p: PortInfo) -> tuple:
+        return (p.port, p.protocol)
 
-    appeared = [p for p in current if (p.port, p.protocol) in appeared_keys]
-    disappeared = [p for p in previous if (p.port, p.protocol) in disappeared_keys]
+    old_map: Dict[tuple, PortInfo] = {key(p): p for p in old}
+    new_map: Dict[tuple, PortInfo] = {key(p): p for p in new}
 
-    return {"appeared": appeared, "disappeared": disappeared}
+    added = [new_map[k] for k in new_map if k not in old_map]
+    removed = [old_map[k] for k in old_map if k not in new_map]
+    return PortDiff(added=added, removed=removed)
