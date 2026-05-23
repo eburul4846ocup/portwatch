@@ -1,56 +1,62 @@
-"""Configuration loader for portwatch."""
+"""Configuration loading for portwatch."""
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from portwatch.alerter import AlertConfig
+from portwatch.ratelimiter import RateLimitConfig
 
-DEFAULT_CONFIG_PATH = Path("/etc/portwatch/config.json")
+_DEFAULT_CONFIG_PATH = "/etc/portwatch/config.json"
 
 
 @dataclass
 class WatchConfig:
-    """Top-level daemon configuration."""
+    ports: List[int] = field(default_factory=list)
+    interval_seconds: int = 60
+    snapshot_file: str = "/var/lib/portwatch/snapshot.json"
+    history_file: str = "/var/lib/portwatch/history.jsonl"
+    alert: Optional[AlertConfig] = None
+    rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
 
-    snapshot_path: Path = Path("/var/lib/portwatch/snapshot.json")
-    scan_interval: int = 300  # seconds
-    port_range: str = "1-1024"
-    alert: AlertConfig = field(default_factory=AlertConfig)
-    log_level: str = "INFO"
 
-
-def _alert_config_from_dict(d: dict) -> AlertConfig:
+def _alert_config_from_dict(data: Dict[str, Any]) -> AlertConfig:
     return AlertConfig(
-        smtp_host=d.get("smtp_host", "localhost"),
-        smtp_port=int(d.get("smtp_port", 25)),
-        smtp_user=d.get("smtp_user"),
-        smtp_password=d.get("smtp_password"),
-        from_addr=d.get("from_addr", "portwatch@localhost"),
-        to_addrs=d.get("to_addrs", []),
-        use_tls=bool(d.get("use_tls", False)),
+        smtp_host=data.get("smtp_host", "localhost"),
+        smtp_port=int(data.get("smtp_port", 25)),
+        sender=data.get("sender", "portwatch@localhost"),
+        recipients=data.get("recipients", []),
+        subject_prefix=data.get("subject_prefix", "[portwatch]"),
     )
 
 
-def load_config(path: Optional[Path] = None) -> WatchConfig:
-    """Load configuration from *path* (JSON).  Missing keys use defaults."""
-    cfg_path = path or DEFAULT_CONFIG_PATH
-    if not cfg_path.exists():
-        return WatchConfig()
+def _rate_limit_config_from_dict(data: Dict[str, Any]) -> RateLimitConfig:
+    return RateLimitConfig(
+        cooldown_seconds=int(data.get("cooldown_seconds", 300)),
+        state_file=data.get("state_file", "/var/lib/portwatch/ratelimit_state.json"),
+    )
 
-    try:
-        raw = json.loads(cfg_path.read_text())
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid JSON in config file {cfg_path}: {exc}") from exc
 
-    alert_cfg = _alert_config_from_dict(raw.get("alert", {}))
+def load_config(path: str = _DEFAULT_CONFIG_PATH) -> WatchConfig:
+    text = Path(path).read_text()
+    data: Dict[str, Any] = json.loads(text)
+
+    alert: Optional[AlertConfig] = None
+    if "alert" in data:
+        alert = _alert_config_from_dict(data["alert"])
+
+    rate_limit = RateLimitConfig()
+    if "rate_limit" in data:
+        rate_limit = _rate_limit_config_from_dict(data["rate_limit"])
+
     return WatchConfig(
-        snapshot_path=Path(raw.get("snapshot_path", "/var/lib/portwatch/snapshot.json")),
-        scan_interval=int(raw.get("scan_interval", 300)),
-        port_range=raw.get("port_range", "1-1024"),
-        alert=alert_cfg,
-        log_level=raw.get("log_level", "INFO"),
+        ports=data.get("ports", []),
+        interval_seconds=int(data.get("interval_seconds", 60)),
+        snapshot_file=data.get("snapshot_file", "/var/lib/portwatch/snapshot.json"),
+        history_file=data.get("history_file", "/var/lib/portwatch/history.jsonl"),
+        alert=alert,
+        rate_limit=rate_limit,
     )

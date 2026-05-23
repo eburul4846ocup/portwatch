@@ -1,73 +1,80 @@
 """Background daemon loop for portwatch."""
 
+from __future__ import annotations
+
 import logging
 import signal
 import time
-from pathlib import Path
+from types import FrameType
+from typing import Optional
 
-from portwatch.alerter import log_alert, send_alert
-from portwatch.config import WatchConfig, load_config
+from portwatch.alerter import send_alert
+from portwatch.config import WatchConfig
+from portwatch.history import append_history_entry
+from portwatch.ratelimiter import RateLimiter
 from portwatch.scanner import scan_ports
-from portwatch.snapshot import load_snapshot, save_snapshot, compute_diff
+from portwatch.snapshot import load_snapshot, save_snapshot, diff_snapshots
 
 logger = logging.getLogger(__name__)
 
 _running = True
 
 
-def _handle_signal(signum, frame):
+def _handle_signal(signum: int, frame: Optional[FrameType]) -> None:
     global _running
-    logger.info("Received signal %s, shutting down.", signum)
+    logger.info("Received signal %d — shutting down.", signum)
     _running = False
 
 
-def _register_signals():
+def _register_signals() -> None:
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
 
 
-def run_once(config: WatchConfig) -> bool:
-    """Perform a single scan cycle. Returns True if changes were detected."""
-    current_ports = scan_ports(
-        host=config.host,
-        port_range=config.port_range,
-    )
-    previous_ports = load_snapshot(config.snapshot_path)
-    diff = compute_diff(previous_ports, current_ports)
+def run_once(config: WatchConfig, rate_limiter: Optional[RateLimiter] = None) -> bool:
+    """Scan ports once, persist snapshot, alert on changes. Returns True if changes found."""
+    current = scan_ports(config.ports)
+    previous = load_snapshot(config.snapshot_file)
+    diff = diff_snapshots(previous, current)
 
     if diff.has_changes():
-        logger.warning(
-            "Port changes detected on %s: +%d -%d",
-            config.host,
-            len(diff.added),
-            len(diff.removed),
-        )
-        log_alert(diff)
+        logger.warning("Port changes detected: +%d -%d", len(diff.added), len(diff.removed))
+        append_history_entry(config.history_file, diff, current)
+
         if config.alert:
-            send_alert(config.alert, diff)
-        save_snapshot(config.snapshot_path, current_ports)
+            alert_key = "port_change"
+            if rate_limiter is None or rate_limiter.is_allowed(alert_key):
+                send_alert(config.alert, diff)
+                if rate_limiter is not None:
+                    rate_limiter.record(alert_key)
+            else:
+                logger.info("Alert suppressed by rate limiter for key '%s'.", alert_key)
+
+        save_snapshot(config.snapshot_file, current)
         return True
 
-    logger.debug("No port changes detected on %s.", config.host)
-    save_snapshot(config.snapshot_path, current_ports)
+    logger.debug("No port changes detected.")
+    save_snapshot(config.snapshot_file, current)
     return False
 
 
-def run_daemon(config_path: str = "portwatch.toml"):
-    """Start the daemon loop using the given config file."""
+def run_daemon(config: WatchConfig) -> None:
+    """Run the monitoring loop until a termination signal is received."""
+    global _running
+    _running = True
     _register_signals()
-    config = load_config(config_path)
-    logger.info(
-        "portwatch daemon started (host=%s, interval=%ds).",
-        config.host,
-        config.interval,
-    )
+
+    rate_limiter = RateLimiter(config=config.rate_limit)
+    logger.info("portwatch daemon started (interval=%ds).", config.interval_seconds)
 
     while _running:
         try:
-            run_once(config)
-        except Exception as exc:  # pylint: disable=broad-except
-            logger.error("Error during scan cycle: %s", exc, exc_info=True)
-        time.sleep(config.interval)
+            run_once(config, rate_limiter=rate_limiter)
+        except Exception:
+            logger.exception("Unexpected error during scan.")
+        for _ in range(config.interval_seconds):
+            if not _running:
+                break
+            time.sleep(1)
 
     logger.info("portwatch daemon stopped.")
