@@ -41,8 +41,32 @@ def _rate_limit_config_from_dict(data: Dict[str, Any]) -> RateLimitConfig:
 
 
 def load_config(path: str = _DEFAULT_CONFIG_PATH) -> WatchConfig:
-    text = Path(path).read_text()
-    data: Dict[str, Any] = json.loads(text)
+    """Load a WatchConfig from a JSON file.
+
+    Args:
+        path: Path to the JSON configuration file.
+
+    Returns:
+        A populated WatchConfig instance.
+
+    Raises:
+        FileNotFoundError: If the config file does not exist.
+        json.JSONDecodeError: If the config file contains invalid JSON.
+        ValueError: If required fields contain invalid values.
+    """
+    config_path = Path(path)
+    if not config_path.exists():
+        raise FileNotFoundError(f"Configuration file not found: {path}")
+
+    try:
+        text = config_path.read_text()
+        data: Dict[str, Any] = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise json.JSONDecodeError(
+            f"Invalid JSON in configuration file {path!r}: {exc.msg}",
+            exc.doc,
+            exc.pos,
+        ) from exc
 
     alert: Optional[AlertConfig] = None
     if "alert" in data:
