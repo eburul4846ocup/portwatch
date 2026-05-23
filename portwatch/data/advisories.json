@@ -1,0 +1,58 @@
+[
+  {
+    "cve_id": "CVE-2023-38408",
+    "port": 22,
+    "proto": "tcp",
+    "service": "ssh",
+    "description": "OpenSSH ssh-agent remote code execution via forwarded agent.",
+    "severity": "critical"
+  },
+  {
+    "cve_id": "CVE-2021-41773",
+    "port": 80,
+    "proto": "tcp",
+    "service": "http",
+    "description": "Apache HTTP Server path traversal and RCE (2.4.49).",
+    "severity": "critical"
+  },
+  {
+    "cve_id": "CVE-2014-0160",
+    "port": 443,
+    "proto": "tcp",
+    "service": "https",
+    "description": "OpenSSL Heartbleed – memory disclosure.",
+    "severity": "high"
+  },
+  {
+    "cve_id": "CVE-2019-0708",
+    "port": 3389,
+    "proto": "tcp",
+    "service": "rdp",
+    "description": "BlueKeep – pre-auth RCE in Windows Remote Desktop Services.",
+    "severity": "critical"
+  },
+  {
+    "cve_id": "CVE-2017-5638",
+    "port": 8080,
+    "proto": "tcp",
+    "service": "http-alt",
+    "description": "Apache Struts2 OGNL injection via Content-Type header.",
+    "severity": "critical"
+  },
+  {
+    "cve_id": "CVE-2020-7247",
+    "port": 25,
+    "proto": "tcp",
+    "service": "smtp",
+    "description": "OpenSMTPD remote code execution via malformed sender address.",
+    "severity": "high"
+  },
+  {
+    "cve_id": "CVE-2015-3306",
+    "port": 21,
+    "proto": "tcp",
+    "service": "ftp",
+    "description": "ProFTPd mod_copy unauthenticated file copy.",
+    "severity": "high"
+  }
+]
