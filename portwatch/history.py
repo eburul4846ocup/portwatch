@@ -80,3 +80,31 @@ def load_history(
     if limit is not None:
         entries = entries[-limit:]
     return entries
+
+
+def get_port_history(
+    history_path: str,
+    port: int,
+    proto: str = "tcp",
+) -> List[dict]:
+    """Return all history entries that include a specific port/protocol pair.
+
+    Each returned dict contains 'timestamp' (datetime) and 'port_info'
+    (PortInfo) for the matching port.
+
+    Args:
+        history_path: Path to the JSONL history file.
+        port: Port number to filter on.
+        proto: Protocol to filter on (default: 'tcp').
+
+    Returns:
+        A list of dicts ordered oldest-to-newest, one per scan entry that
+        contained the given port.
+    """
+    results = []
+    for entry in load_history(history_path):
+        for port_info in entry["ports"]:
+            if port_info.port == port and port_info.proto == proto:
+                results.append({"timestamp": entry["timestamp"], "port_info": port_info})
+                break
+    return results
